@@ -64,6 +64,29 @@ test('active sprint ignores future changes and flags projected finish risk', () 
   assert.equal(metrics.expectedFinish, new Date(start + 25 * DAY).toISOString());
 });
 
+test('creation-time sprint membership is counted once as added scope', () => {
+  const created = { ...issue('TEAM-1', 5, todo, [event(2, 'sprint', [], ['10'])]),
+    created: new Date(start + 2 * DAY).toISOString() };
+  const metrics = sprintMetrics(sprint, [created]);
+  assert.equal(metrics.plannedPoints, 0);
+  assert.equal(metrics.addedPoints, 5);
+});
+
+test('sprint completion follows the rightmost column rather than global status categories', () => {
+  const reviewed = { id: '4', name: 'Reviewed', category: 'done' };
+  const released = { id: '5', name: 'Released', category: 'indeterminate' };
+  const items = [
+    issue('TEAM-1', 5, reviewed, [event(8, 'status', todo, reviewed)]),
+    issue('TEAM-2', 3, released, [event(8, 'status', todo, released)]),
+  ];
+  const metrics = sprintMetrics(sprint, items, start + 10 * DAY, ['5']);
+  assert.equal(metrics.completedPoints, 3);
+  assert.equal(metrics.throughput, 1);
+  assert.equal(metrics.remainingPoints, 5);
+  assert.equal(metrics.commitmentReliability, 37.5);
+  assert.equal(metrics.series.at(-1).completed, 3);
+});
+
 test('empty and zero-velocity sprints do not produce NaN or false certainty', () => {
   const metrics = sprintMetrics(sprint, []);
   assert.equal(metrics.commitmentReliability, null);
@@ -149,4 +172,25 @@ test('combined report includes epic forecast and CSV neutralizes spreadsheet for
   assert.equal(report.epic.sprints, 2);
   report.history[0].name = '=HYPERLINK("bad")';
   assert.ok(toCsv(report).includes(`"'=HYPERLINK(""bad"")"`));
+  report.history[0].name = '  =HYPERLINK("bad")';
+  assert.ok(toCsv(report).includes(`"'  =HYPERLINK(""bad"")"`));
+});
+
+test('live epic forecasts use current dates and current history while sprint reports remain historical', () => {
+  const now = start + 100 * DAY;
+  const liveSprint = { ...sprint, id: 11, startDate: new Date(start + 80 * DAY).toISOString(),
+    endDate: new Date(start + 90 * DAY).toISOString(), completeDate: new Date(start + 90 * DAY).toISOString() };
+  const items = [
+    issue('TEAM-1', 5, done, [event(8, 'status', todo, done)]),
+    issue('TEAM-2', 10, done, [event(88, 'status', todo, done)], ['11']),
+  ];
+  const report = analyze({ sprint, sprints: [sprint], epicSprints: [liveSprint], issues: items,
+    epic: { key: 'TEAM-100', asOf: now,
+      issues: [{ points: 20, fields: { status: { statusCategory: { key: 'new' } } } }] },
+    now: start + 10 * DAY });
+  assert.equal(report.forecast.velocity, 5);
+  assert.equal(report.epic.velocity, 10);
+  assert.equal(report.epic.sprints, 2);
+  assert.equal(report.epic.asOf, new Date(now).toISOString());
+  assert.equal(report.epic.completionDate, new Date(now + 20 * DAY).toISOString().slice(0, 10));
 });

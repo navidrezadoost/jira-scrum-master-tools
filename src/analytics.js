@@ -20,7 +20,8 @@ function snapshot(issue, at) {
   return state;
 }
 
-function sprintMetrics(sprint, issues, now = Date.now()) {
+function sprintMetrics(sprint, issues, now = Date.now(), completedStatusIds) {
+  const done = state => completedStatusIds ? completedStatusIds.includes(state?.status?.id) : isDone(state);
   const start = time(sprint.startDate);
   const end = sprint.state === 'closed' ? time(sprint.completeDate || sprint.endDate) : now;
   const duration = time(sprint.endDate) - start;
@@ -29,9 +30,9 @@ function sprintMetrics(sprint, issues, now = Date.now()) {
   }
   const rows = issues.map(issue => ({ issue, before: snapshot(issue, start), after: snapshot(issue, end) }));
   const belongs = state => state?.sprintIds.includes(String(sprint.id));
-  const planned = rows.filter(row => belongs(row.before) && !isDone(row.before));
-  const scope = rows.filter(row => belongs(row.after) && !isDone(row.before));
-  const completed = scope.filter(row => isDone(row.after));
+  const planned = rows.filter(row => belongs(row.before) && !done(row.before));
+  const scope = rows.filter(row => belongs(row.after) && !done(row.before));
+  const completed = scope.filter(row => done(row.after));
   const plannedPoints = sum(planned.map(row => row.before.points));
   const completedPoints = sum(completed.map(row => row.after.points));
   let addedPoints = 0;
@@ -42,7 +43,7 @@ function sprintMetrics(sprint, issues, now = Date.now()) {
       const initial = snapshot(issue, created);
       if (belongs(initial)) addedPoints += initial.points;
     }
-    for (const event of issue.history.filter(item => item.at > start && item.at <= end
+    for (const event of issue.history.filter(item => item.at > Math.max(start, created) && item.at <= end
       && item.changes.some(change => change.field === 'sprint'))) {
       const before = snapshot(issue, event.at - 1);
       const after = snapshot(issue, event.at);
@@ -50,9 +51,9 @@ function sprintMetrics(sprint, issues, now = Date.now()) {
       if (belongs(before) && !belongs(after)) removedPoints += before.points;
     }
   }
-  const committedDone = planned.filter(row => belongs(row.after) && isDone(row.after));
+  const committedDone = planned.filter(row => belongs(row.after) && done(row.after));
   const committedCompletedPoints = sum(committedDone.map(row => row.before.points));
-  const remainingPoints = sum(scope.filter(row => !isDone(row.after)).map(row => row.after.points));
+  const remainingPoints = sum(scope.filter(row => !done(row.after)).map(row => row.after.points));
   const series = [];
   const days = Math.ceil((end - start) / DAY);
   if (days > 366) throw new Error('Sprint duration exceeds the supported one-year range.');
@@ -62,8 +63,8 @@ function sprintMetrics(sprint, issues, now = Date.now()) {
     series.push({
       date: new Date(at).toISOString(),
       ideal: duration > 0 ? plannedPoints * Math.max(0, 1 - (at - start) / duration) : null,
-      remaining: sum(states.filter(state => !isDone(state)).map(state => state.points)),
-      completed: sum(states.filter(isDone).map(state => state.points)),
+      remaining: sum(states.filter(state => !done(state)).map(state => state.points)),
+      completed: sum(states.filter(done).map(state => state.points)),
       scope: sum(states.map(state => state.points)),
     });
   }
@@ -237,22 +238,25 @@ function insights(metrics, history, forecast, teamCapacity, flow) {
   return messages;
 }
 
-function analyze({ sprint, sprints, issues, capacityInputs, epic, now = Date.now(), simulationOptions }) {
-  const metrics = sprintMetrics(sprint, issues, now);
-  const history = sprints.filter(item => item.state === 'closed' && item.startDate)
+function analyze({ sprint, sprints, issues, capacityInputs, epic, epicSprints, completedStatusIds,
+  now = Date.now(), simulationOptions }) {
+  const metrics = sprintMetrics(sprint, issues, now, completedStatusIds);
+  const historyFor = items => items.filter(item => item.state === 'closed' && item.startDate)
     .sort((a, b) => time(a.completeDate || a.endDate) - time(b.completeDate || b.endDate))
-    .map(item => sprintMetrics(item, issues, now));
+    .map(item => sprintMetrics(item, issues, now, completedStatusIds));
+  const history = historyFor(sprints);
   const flow = flowMetrics(issues, now);
   const durationDays = (time(sprint.endDate) - time(sprint.startDate)) / DAY;
   const forecast = forecasts(history, metrics.remainingPoints, durationDays, now, simulationOptions);
   const teamCapacity = capacity(capacityInputs, forecast.velocity);
   const epicForecast = epic ? {
     key: epic.key,
+    asOf: new Date(epic.asOf ?? now).toISOString(),
     remainingPoints: sum(epic.issues.filter(issue => issue.fields.status.statusCategory.key !== 'done')
       .map(issue => Number(issue.points) || 0)),
   } : null;
   if (epicForecast) Object.assign(epicForecast,
-    forecasts(history, epicForecast.remainingPoints, durationDays, now, simulationOptions));
+    forecasts(historyFor(epicSprints || sprints), epicForecast.remainingPoints, durationDays, epic.asOf ?? now, simulationOptions));
   return {
     generatedAt: new Date(now).toISOString(), metrics, history, flow, forecast, capacity: teamCapacity,
     health: health(metrics, forecast, flow), epic: epicForecast,
@@ -263,7 +267,7 @@ function analyze({ sprint, sprints, issues, capacityInputs, epic, now = Date.now
 function toCsv(report) {
   const escape = value => {
     const text = value === null || value === undefined ? '' : String(value);
-    const safe = /^[=+\-@\t\r\n]/.test(text) ? `'${text}` : text;
+    const safe = /^\s*[=+\-@]|^[\t\r\n]/.test(text) ? `'${text}` : text;
     return `"${safe.replace(/"/g, '""')}"`;
   };
   return [

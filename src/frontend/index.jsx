@@ -74,7 +74,7 @@ function Report({ report }) {
       ...(epic ? [[`${epic.key} (${format(epic.remainingPoints)} remaining points)`,
         ...['p50', 'p85', 'p95'].map(p => `${format(epic.monteCarlo?.[p])} / ${format(epic.monteCarlo?.[`${p}Date`])}`)]] : []),
     ]} />
-    {epic && <Text>{`Epic velocity-based completion: ${format(epic.completionDate)} (${format(epic.sprints)} sprints).`}</Text>}
+    {epic && <Text>{`Current epic forecast as of ${epic.asOf}: ${format(epic.completionDate)} (${format(epic.sprints)} sprints), using ${epic.sampleSize} latest closed sprints. Epic scope is not historical.`}</Text>}
     <Heading size="medium">Team capacity and flow analytics</Heading>
     <Table headers={['Metric', 'Value']} rows={[
       ['Available person-days', capacity.availableDays], ['Availability (%)', capacity.availability],
@@ -118,7 +118,10 @@ function Dashboard() {
 
   useEffect(() => {
     let current = true;
-    invoke('boards').then(data => { if (current) setBoards(data); })
+    invoke('boards').then(data => {
+      if (!Array.isArray(data)) throw new Error('Unexpected Jira board response.');
+      if (current) setBoards(data);
+    })
       .catch(err => { if (current) setError(err.message || 'Unable to load boards.'); })
       .finally(() => { if (current) setLoadingBoards(false); });
     return () => { current = false; };
@@ -130,6 +133,7 @@ function Dashboard() {
     setLoadingSprints(true);
     setError('');
     invoke('sprints', { boardId: board.value }).then(data => {
+      if (!Array.isArray(data)) throw new Error('Unexpected Jira sprint response.');
       if (current) setSprints(data);
     }).catch(err => { if (current) setError(err.message || 'Unable to load sprints.'); })
       .finally(() => { if (current) setLoadingSprints(false); });

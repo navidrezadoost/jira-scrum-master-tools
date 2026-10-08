@@ -19,6 +19,10 @@ function points(value) {
 }
 
 function normalizeIssue(issue, histories, pointField, sprintField, statuses) {
+  if (!Number.isFinite(new Date(issue.fields.created).getTime()) || !issue.fields.created
+    || histories.some(history => !history.created || !Number.isFinite(new Date(history.created).getTime()))) {
+    throw new Error(`Issue history dates for ${issue.key} are invalid. No partial report was generated.`);
+  }
   const status = (value, name) => {
     const found = statuses.get(String(value));
     if (!found) throw new Error(`Status history for ${issue.key} is unavailable. No partial report was generated.`);
@@ -135,15 +139,21 @@ class JiraClient {
     }
     const sprintField = fields.find(field => field.schema?.custom === 'com.pyxis.greenhopper.jira:gh-sprint')?.id;
     if (!sprintField) throw new Error('Jira Sprint field is unavailable.');
-    const cutoff = sprint.state === 'closed' ? new Date(sprint.completeDate || sprint.endDate).getTime() : Date.now();
-    const closed = allSprints.filter(item => item.state === 'closed' && item.startDate
-      && new Date(item.completeDate || item.endDate).getTime() <= cutoff)
+    const completedStatusIds = config.columnConfig?.columns?.at(-1)?.statuses?.map(status => String(status.id));
+    if (!completedStatusIds?.length) throw new Error('Map completed statuses to the rightmost board column.');
+    const reportNow = Date.now();
+    const cutoff = sprint.state === 'closed' ? new Date(sprint.completeDate || sprint.endDate).getTime() : reportNow;
+    const closedAt = at => allSprints.filter(item => item.state === 'closed' && item.startDate
+      && new Date(item.completeDate || item.endDate).getTime() <= at)
       .sort((a, b) => new Date(b.completeDate || b.endDate) - new Date(a.completeDate || a.endDate)).slice(0, 6);
+    const closed = closedAt(cutoff);
+    const epicSprints = epicKey ? closedAt(reportNow) : [];
     const selectedSprints = [...new Map([...closed, sprint].map(item => [item.id, item])).values()];
-    const earliest = Math.min(...selectedSprints.map(item => new Date(item.startDate).getTime()));
+    const loadedSprints = [...selectedSprints, ...epicSprints];
+    const earliest = Math.min(...loadedSprints.map(item => new Date(item.startDate).getTime()));
     const requestedFields = `created,updated,status,${pointField},${sprintField}`;
     const candidates = await this.pages(startAt => this.route`/rest/agile/1.0/board/${board}/issue?fields=${requestedFields}&startAt=${startAt}&maxResults=100`, 'issues', 500);
-    const sprintSet = new Set(selectedSprints.map(item => String(item.id)));
+    const sprintSet = new Set(loadedSprints.map(item => String(item.id)));
     const relevant = candidates.filter(issue => sprintIds(issue.fields[sprintField]).some(value => sprintSet.has(value))
       || new Date(issue.fields.updated).getTime() >= earliest
       || issue.fields.status.statusCategory.key !== 'done');
@@ -154,8 +164,9 @@ class JiraClient {
       issues.push(...await Promise.all(relevant.slice(offset, offset + 5).map(async issue =>
         normalizeIssue(issue, await this.changelog(issue.key), pointField, sprintField, statuses))));
     }
-    const epic = epicKey ? await this.epic(epicKey.trim().toUpperCase(), pointField) : null;
-    const report = analyze({ sprint, sprints: selectedSprints, issues, capacityInputs, epic, now: cutoff });
+    const epic = epicKey ? { ...await this.epic(epicKey.trim().toUpperCase(), pointField), asOf: reportNow } : null;
+    const report = analyze({ sprint, sprints: selectedSprints, issues, capacityInputs,
+      epic, epicSprints, completedStatusIds, now: cutoff });
     return {
       ...report, csv: toCsv(report),
       dataNotes: [
@@ -164,7 +175,7 @@ class JiraClient {
         'Dates and durations use calendar days in UTC. Burndown predictions assume the observed completion rate continues.',
         'Blocked time recognizes statuses named Blocked or On Hold. Flow efficiency is a status-duration proxy, not measured hands-on time.',
         'Insights are explainable rules, not a generative AI service. Thresholds and health scores are coaching heuristics.',
-        'Epic forecasts cover visible direct children only; subtask estimates are not double-counted. Unestimated children contribute zero points.',
+        'Epic forecasts always use current visible direct children and the latest closed sprints, even when viewing a historical sprint. Subtasks are not double-counted; unestimated children contribute zero points.',
       ],
     };
   }

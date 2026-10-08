@@ -40,6 +40,8 @@ Open **Engineering Intelligence** in the project sidebar:
 
 The app paginates board/sprint lists, issues, changelogs and epic searches. It reconstructs sprint membership, estimates and status at sprint start/end from changelogs rather than treating current fields as historical facts.
 
+Sprint completion follows the board's **rightmost column** status mappings, matching Jira Scrum reporting. Flow analytics and epic child completion use Jira's global status categories.
+
 | Metric | Definition |
 | --- | --- |
 | Planned points | Start-of-sprint estimates for members not already Done |
@@ -63,7 +65,7 @@ Safety limits are 500 board issues, 5,000 changelog entries per issue, 2,000 boa
 
 Dates are UTC and duration calculations use calendar days, not business-time calendars. Zero/missing estimates contribute zero points and are highlighted. Blocked time recognizes statuses named **Blocked** or **On Hold**; teams with other workflows should adapt this rule in `src/analytics.js`. Flow efficiency is a status-duration proxy, not measured hands-on time. Scope churn >20% and reliability <80% are transparent coaching heuristics, not universal Scrum standards. Active-sprint health is provisional.
 
-Epic forecasts use visible direct children of a hierarchy-level-1 epic, not recursive descendants, and do not double-count subtasks. Point forecasts are unavailable without positive historical delivery. No deployment or incident data is available: **DORA metrics and release health are intentionally not inferred from issue status**.
+Epic forecasts use **current** visible direct children of a hierarchy-level-1 epic and the latest six closed sprints, with dates anchored to the current report request even when selecting a historical sprint. They are not historical epic snapshots. They do not traverse recursive descendants or double-count subtasks. Point forecasts are unavailable without positive historical delivery. No deployment or incident data is available: **DORA metrics and release health are intentionally not inferred from issue status**.
 
 ## Architecture and development
 
@@ -79,7 +81,7 @@ The pure engine is separate from Jira access and the UI, so deployment/incident 
 
 ```sh
 npm test        # Node's built-in runner: calculations and mocked Jira integration
-npm run check  # Backend syntax and frontend JSX compilation check
+npm run check  # Backend syntax and frontend JSX/type checks
 npm run lint   # Forge manifest/application lint (requires installed Forge CLI)
 npm audit
 ```

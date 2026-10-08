@@ -52,6 +52,10 @@ test('normalization uses configured fields and changelog IDs, not display names'
   assert.deepEqual(result.history[0].changes[1].to, ['9', '10']);
   assert.equal(result.history[0].changes[2].from.category, 'new');
   assert.throws(() => normalizeIssue(item, histories, 'customfield_10001', 'customfield_10002', new Map()), /unavailable/);
+  assert.throws(() => normalizeIssue(item, [{ ...histories[0], created: null }],
+    'customfield_10001', 'customfield_10002', statuses), /dates/);
+  assert.throws(() => normalizeIssue({ ...item, fields: { ...item.fields, created: 'invalid' } },
+    histories, 'customfield_10001', 'customfield_10002', statuses), /dates/);
 });
 
 test('input validation blocks unsafe IDs, JQL injection and invalid estimates', async () => {
@@ -97,7 +101,10 @@ test('report integrates board config, paginated histories, and historical scope'
     const url = new URL(path, 'https://jira.invalid');
     if (url.pathname === '/rest/agile/1.0/board') return response({ values: [{ id: 1 }], isLast: true });
     if (url.pathname.endsWith('/sprint')) return response({ values: [sprint], isLast: true });
-    if (url.pathname.endsWith('/configuration')) return response({ estimation: { field: { fieldId: 'customfield_1' } } });
+    if (url.pathname.endsWith('/configuration')) return response({
+      estimation: { field: { fieldId: 'customfield_1' } },
+      columnConfig: { columns: [{ statuses: [{ id: '1' }] }, { statuses: [{ id: '2' }] }] },
+    });
     if (url.pathname === '/rest/api/3/field') return response(fields);
     if (url.pathname === '/rest/api/3/status') return response(statuses);
     if (url.pathname.endsWith('/changelog')) return response({ values: [
