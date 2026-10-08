@@ -1,0 +1,32 @@
+{
+  "name": "jira-scrum-master-tools",
+  "version": "1.0.0",
+  "description": "In-Jira Scrum analytics and engineering intelligence built on Forge",
+  "private": true,
+  "overrides": {
+    "prosemirror-view": "1.42.6"
+  },
+  "main": "src/index.js",
+  "scripts": {
+    "test": "node --test",
+    "check": "node --check src/index.js && node --check src/jira.js && node --check src/analytics.js && tsc --allowJs --jsx react --noEmit --skipLibCheck src/frontend/index.jsx",
+    "lint": "forge lint"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/navidrezadoost/jira-scrum-master-tools"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@forge/api": "^8.2.0",
+    "@forge/bridge": "^7.1.0",
+    "@forge/react": "^12.3.0",
+    "@forge/resolver": "^2.0.0",
+    "react": "^18.3.1"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3"
+  }
+}
